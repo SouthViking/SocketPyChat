@@ -10,9 +10,10 @@ sys.path.append('..')
 from utils.screen_cleaner import screen_cleaner
 from utils.log_print import log_print
 
-colorama.init()
+colorama.init()  # Inicialización de colores para CLI.
 
 class Server:
+    
     def __init__(self, host, port):
         # Se intenta realizar la conexión según el host y puerto señalado.
         try:
@@ -39,6 +40,17 @@ class Server:
         try:
             while True:
                 data = conn.recv(4096)
+
+                if not data:
+                    self.connections.remove(conn)
+                    conn.close()
+                    break
+
+                msg = 'Recibido desde cliente (' + str(client_address[0]) + ' , ' + str(client_address[1]) + '): ' + str(data)
+                log_print(msg, 3)
+
+                # Se envía a los demás clientes conectados
+                self.send_all(conn, data)
         
         except Exception as error:
             msg = 'Se ha producido el siguiente error en la conexión con el cliente (' + str(client_address[0]) + ' , ' + str(client_address[1]) +'):'
@@ -48,7 +60,16 @@ class Server:
             # Se cierra la conexión y se elimina de la lista de conexiones del servidor.
             self.connections.remove(conn)
             conn.close()
+            print(colorama.Fore.YELLOW + '* Conexiones actuales: ' + str(self.connections) + colorama.Style.RESET_ALL)
+            
             return
+    
+    # Método para enviar mensaje a todos los clientes conectados
+    def send_all(self, conn, data):
+        for connection in self.connections:
+            if connection != conn:
+                # En caso de que la conexión no corresponda a la del emisor, se envía al cliente correspondiente.
+                connection.send(data)
 
     # Proceso principal de ejecución del servidor
     def run(self):
@@ -61,7 +82,7 @@ class Server:
 
                 # Se agrega la conexión a la lista de conexiones del servidor.
                 self.connections.append(connection)
-                print('Conexiones actuales: ' + str(self.connections))
+                print(colorama.Fore.YELLOW + '* Conexiones actuales: ' + str(self.connections) + colorama.Style.RESET_ALL)
 
                 # Se crea un nuevo thread para la atención de la conexión del nuevo cliente.
                 client_thread = threading.Thread(target = self.handler, args = (connection, client_address))
