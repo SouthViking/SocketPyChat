@@ -4,6 +4,7 @@ import pickle
 import socket
 import colorama
 import threading
+from datetime import datetime
 
 sys.path.append('..')
 
@@ -11,6 +12,12 @@ from utils.screen_cleaner import screen_cleaner
 from utils.log_print import log_print
 
 colorama.init()  # Inicialización de colores para CLI.
+
+class ClientInfo:
+    def __init__(self, from_host, from_port, username = None):
+        self.from_host = from_host
+        self.from_port = from_port
+        self.username = username
 
 class Server:
     
@@ -24,6 +31,7 @@ class Server:
             self.host = host
             self.port = port
             self.connections = [] # Lista de conexiones de clientes.
+            self.clients = {} # Diccionario para almacenamiento de información de usuarios.
 
             # Se inicia el proceso principal del servidor.
             log_print('Servidor inicializado correctamente.', 2)
@@ -43,24 +51,63 @@ class Server:
 
                 if not data:
                     self.connections.remove(conn)
+                    del self.clients[conn]
                     conn.close()
                     break
 
-                msg = 'Recibido desde cliente (' + str(client_address[0]) + ' , ' + str(client_address[1]) + '): ' + str(data)
-                log_print(msg, 3)
+                # Se descompone la tupla recibida entre datos y código de transacción
+                recv_data = pickle.loads(data)
+                tx_code = recv_data[0]
 
-                # Se envía a los demás clientes conectados
-                self.send_all(conn, data)
+                log_print('[!] Se ha recibido una nueva transacción.', 3)
+                log_print('Código de transacción: ' + str(tx_code) + ' || Recibido desde cliente: (' +
+                          str(client_address[0]) + ' , ' + str(client_address[1]) + ').', 3)
+
+                # Se verifica la transacción según el código recibido.
+
+                if tx_code == 'CLIENT_MSG': # Envío de mensaje de chat hacia los demás usuarios.
+
+                    log_print('Mensaje recibido: ' + str(recv_data[1]), 3)
+
+                    # Se genera el objeto a enviar, con el mensaje, datetime y nombre del usuario emisor.
+                    msg_object = {}
+                    msg_object['incoming_msg'] = recv_data[1]
+                    msg_object['sent_at'] = str(
+                        datetime.now().replace(microsecond=0))
+                    
+                    if conn in self.clients.keys():
+                        msg_object['sender_username'] = self.clients[conn].username if self.clients[conn].username else '???'
+                    
+                    else:
+                        msg_object['sender_username'] = '???'
+
+                    self.send_all(conn, pickle.dumps(
+                        (tx_code, msg_object)))
+                
+                elif tx_code == 'USERNAME_REG': # Registro de nombre de usuario en el servidor.
+
+                    self.clients[conn].username = recv_data[1]
+                    log_print('Nombre de usuario registrado: ' + str(recv_data[1]), 3)
+                    
+                    # Se notifica a los clientes el ingreso del nuevo usuario al chat.
+                    self.send_all(conn, pickle.dumps(
+                        ('CLIENT_JOIN', recv_data[1])))
         
         except Exception as error:
             msg = 'Se ha producido el siguiente error en la conexión con el cliente (' + str(client_address[0]) + ' , ' + str(client_address[1]) +'):'
             log_print(msg, 0)
             log_print(str(error), 0)
 
+            # Se notifica la salida del cliente del chat.
+            if conn in self.clients.keys():
+                self.send_all(conn, pickle.dumps(
+                    ('CLIENT_EXIT', self.clients[conn].username)))
+
             # Se cierra la conexión y se elimina de la lista de conexiones del servidor.
             self.connections.remove(conn)
+            del self.clients[conn]
             conn.close()
-            print(colorama.Fore.YELLOW + '* Conexiones actuales: ' + str(self.connections) + colorama.Style.RESET_ALL)
+            log_print('* Conexiones actuales: ' + str(self.connections), 1)
             
             return
     
@@ -82,7 +129,8 @@ class Server:
 
                 # Se agrega la conexión a la lista de conexiones del servidor.
                 self.connections.append(connection)
-                print(colorama.Fore.YELLOW + '* Conexiones actuales: ' + str(self.connections) + colorama.Style.RESET_ALL)
+                self.clients[connection] = ClientInfo(str(client_address[0]), str(client_address[1]))
+                log_print('* Conexiones actuales: ' + str(self.connections), 1)
 
                 # Se crea un nuevo thread para la atención de la conexión del nuevo cliente.
                 client_thread = threading.Thread(target = self.handler, args = (connection, client_address))
